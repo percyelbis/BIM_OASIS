@@ -1,0 +1,13 @@
+# Dependencias
+node_modules/
+
+# Build generado
+dist/
+
+# Vite / logs
+.vite/
+*.log
+
+# Sistema
+.DS_Store
+Thumbs.db
