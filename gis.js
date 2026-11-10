@@ -3,8 +3,8 @@ const F = 1 / 298.257223563;
 const K0 = 0.9996;
 
 export const ZONE = 19;
-// Origen local del modelo (matriz de coordinacion del IFC, EPSG:32719).
-// En la escena: +X = este, +Y = elevacion, -Z = norte.
+// Origen por defecto (Río Salado / Espinar, Cusco, EPSG:32719).
+// En la escena local: +X = este, +Y = elevacion, -Z = norte.
 export const SITE_E = 246226.22859;
 export const SITE_N = 8363461.91194;
 export const SITE_ELEV = 3883.842;
@@ -93,3 +93,132 @@ export function tileToLonLat(x, y, z) {
 }
 
 export const tileWorldSize = (lat, z) => (40075016.686 * Math.cos((lat * Math.PI) / 180)) / 2 ** z;
+
+/**
+ * Extrae la georreferencia real de CUALQUIER archivo IFC (STEP/ISO-10303-21)
+ * Analiza IFCPROJECTEDCRS, IFCMAPCONVERSION, IFCSITE e IFCCARTESIANPOINT.
+ */
+export function extractIfcGeoreference(ifcBufferOrText) {
+  let text = "";
+  if (typeof ifcBufferOrText === "string") {
+    text = ifcBufferOrText.slice(0, 800000);
+  } else if (ifcBufferOrText instanceof Uint8Array || ArrayBuffer.isView(ifcBufferOrText)) {
+    const len = Math.min(ifcBufferOrText.length, 800000);
+    text = new TextDecoder("utf-8").decode(ifcBufferOrText.subarray(0, len));
+  } else {
+    return { hasGeoref: false, E: null, N: null, lat: null, lon: null };
+  }
+
+  let crs = null;
+  let zone = ZONE;
+  let isSouth = true;
+  let E = null;
+  let N = null;
+  let elev = null;
+  let lat = null;
+  let lon = null;
+  let hasGeoref = false;
+
+  // 1. Detectar Sistema Proyectado (EPSG)
+  const crsMatch = text.match(/IFCPROJECTEDCRS\s*\(\s*['"]([^'"]+)['"]/i);
+  if (crsMatch) {
+    crs = crsMatch[1];
+    const epsgMatch = crs.match(/EPSG:(\d+)/i);
+    if (epsgMatch) {
+      const code = parseInt(epsgMatch[1], 10);
+      if (code >= 32701 && code <= 32760) {
+        zone = code - 32700;
+        isSouth = true;
+      } else if (code >= 32601 && code <= 32660) {
+        zone = code - 32600;
+        isSouth = false;
+      }
+    }
+  }
+
+  // 2. Detectar IFCMAPCONVERSION (Eastings, Northings, OrthogonalHeight)
+  const mapMatch = text.match(/IFCMAPCONVERSION\s*\([^,]+,[^,]+,\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)/i);
+  if (mapMatch) {
+    const mE = parseFloat(mapMatch[1]);
+    const mN = parseFloat(mapMatch[2]);
+    const mH = parseFloat(mapMatch[3]);
+    if (Math.abs(mE) > 1000 && Math.abs(mN) > 1000) {
+      E = mE;
+      N = mN;
+      elev = mH;
+      hasGeoref = true;
+    }
+  }
+
+  // 3. Detectar coordenadas UTM en puntos cartesianos del Site/Project placement
+  if (!hasGeoref) {
+    const ptMatches = [
+      ...text.matchAll(
+        /IFCCARTESIANPOINT\s*\(\s*\(\s*([1-9]\d{4,}\.?\d*)\s*,\s*([1-9]\d{5,}\.?\d*)\s*,\s*([-\d.]+)\s*\)\s*\)/gi
+      ),
+    ];
+    if (ptMatches.length > 0) {
+      const first = ptMatches[0];
+      E = parseFloat(first[1]);
+      N = parseFloat(first[2]);
+      elev = parseFloat(first[3]);
+      hasGeoref = true;
+    }
+  }
+
+  // 4. Detectar IFCSITE (RefLatitude, RefLongitude)
+  if (!hasGeoref) {
+    const siteMatch = text.match(
+      /IFCSITE\s*\([^,]+,[^,]+,[^,]+,[^,]+,[^,]+,[^,]+,[^,]+,[^,]+,[^,]+,\s*\(([^)]+)\)\s*,\s*\(([^)]+)\)\s*,\s*([-\d.]+)/i
+    );
+    if (siteMatch) {
+      const parseDms = (str) => {
+        const parts = str.split(",").map((s) => parseFloat(s.trim()));
+        if (parts.length >= 3) {
+          const sign = parts[0] < 0 || Object.is(parts[0], -0) ? -1 : 1;
+          const d = Math.abs(parts[0]);
+          const m = parts[1] || 0;
+          const s = parts[2] || 0;
+          const u = parts[3] || 0;
+          return sign * (d + m / 60 + (s + u / 1000000) / 3600);
+        }
+        return null;
+      };
+      const sLat = parseDms(siteMatch[1]);
+      const sLon = parseDms(siteMatch[2]);
+      const sElev = parseFloat(siteMatch[3]);
+
+      // Filtrar default de plantilla Revit genérica (40.42, -3.70 Madrid)
+      const isRevitDefault = sLat && Math.abs(sLat - 40.42) < 0.1 && sLon && Math.abs(sLon - (-3.7)) < 0.1;
+      if (sLat != null && sLon != null && !isRevitDefault && (Math.abs(sLat) > 0.01 || Math.abs(sLon) > 0.01)) {
+        lat = sLat;
+        lon = sLon;
+        elev = sElev || 0;
+        hasGeoref = true;
+      }
+    }
+  }
+
+  // Convertir UTM -> Lat/Lon o viceversa
+  if (E != null && N != null) {
+    const converted = utmToLatLon(E, N, zone, isSouth);
+    lat = converted.lat;
+    lon = converted.lon;
+  } else if (lat != null && lon != null) {
+    const converted = latLonToUtm(lat, lon, zone, isSouth);
+    E = converted.e;
+    N = converted.n;
+  }
+
+  return {
+    hasGeoref,
+    crs: crs || (hasGeoref ? `UTM ${zone}${isSouth ? "S" : "N"}` : null),
+    zone,
+    isSouth,
+    E,
+    N,
+    elev: elev ?? 0,
+    lat,
+    lon,
+  };
+}

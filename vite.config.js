@@ -1,7 +1,11 @@
 import { defineConfig } from "vite";
 
-// En produccion usa rutas relativas para que funcione igual en
-// https://usuario.github.io/repositorio/ que en un dominio propio.
+// base = "/BIM_OASIS/" para GitHub Pages
+// en dev usa "/" (raiz local)
 export default defineConfig(({ command }) => ({
-  base: command === "build" ? "./" : "/",
+  base: command === "build" ? "/BIM_OASIS/" : "/",
+  build: {
+    outDir: "dist",
+    chunkSizeWarningLimit: 8000,
+  },
 }));

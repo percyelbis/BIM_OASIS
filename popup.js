@@ -279,9 +279,9 @@ export function createPopup(components) {
     typeEl.style.background = meta.color + "1f";
     typeEl.style.color = meta.color;
     gidEl.textContent = globalId || "";
-    latEl.textContent = lat != null ? `${lat.toFixed(6)}°` : "—";
-    lonEl.textContent = lon != null ? `${lon.toFixed(6)}°` : "—";
-    elevEl.textContent = elev != null ? `${elev.toFixed(2)} m` : "—";
+    if (latEl) latEl.textContent = lat != null ? `${lat.toFixed(6)}°` : "—";
+    if (lonEl) lonEl.textContent = lon != null ? `${lon.toFixed(6)}°` : "—";
+    if (elevEl) elevEl.textContent = elev != null ? `${elev.toFixed(2)} m` : "—";
     body.scrollTop = 0;
     root.hidden = false;
     requestAnimationFrame(() => root.classList.add("gp-visible"));

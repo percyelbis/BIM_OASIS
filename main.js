@@ -1,10 +1,9 @@
 import * as OBC from "@thatopen/components";
 import * as OBF from "@thatopen/components-front";
 import * as THREE from "three";
-import ifcUrl from "./proyecto.ifc?url";
-import { ZONE, SITE_E, SITE_N, SITE_ELEV, utmToLatLon } from "./gis.js";
-import { buildBaseMap } from "./basemap.js";
 import { createPopup, metaFor } from "./popup.js";
+import { buildBaseMap } from "./basemap.js";
+import { ZONE, SITE_E, SITE_N, SITE_ELEV, utmToLatLon, extractIfcGeoreference } from "./gis.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -21,62 +20,68 @@ const panelOpenBtn = $("#panel-open");
 const panelCloseBtn = $("#panel-close");
 const fitBtn = $("#btn-fit");
 const loadFileBtn = $("#load-file");
+const loadFile2Btn = $("#load-file-2");
 const fileInput = $("#file-input");
 const loadingEl = $("#loading");
 const loadingBar = $("#loading-bar");
 const loadingPct = $("#loading-pct");
 const loadingSub = $("#loading-sub");
 const loadingError = $("#loading-error");
-const viewChips = [...document.querySelectorAll("[data-view]")];
-const mapChips = [...document.querySelectorAll("[data-map]")];
+const dropZone = $("#drop-zone");
 const geoHint = $("#geo-hint");
+const viewChips = [...document.querySelectorAll("[data-view]")];
+const bgChips = [...document.querySelectorAll("[data-bg]")];
+const mapChips = [...document.querySelectorAll("[data-map]")];
+const themeBtn = $("#btn-theme");
 
 /* ------------------------------------------------------------------ */
 /*  UI helpers                                                         */
 /* ------------------------------------------------------------------ */
 
 const status = (text) => {
-  statusEl.textContent = text;
+  if (statusEl) statusEl.textContent = text;
 };
 
 const setLoadingProgress = (progress) => {
   const pct = Math.round(progress * 100);
-  loadingBar.style.width = `${pct}%`;
-  loadingPct.textContent = `${pct}%`;
+  if (loadingBar) loadingBar.style.width = `${pct}%`;
+  if (loadingPct) loadingPct.textContent = `${pct}%`;
 };
 
 const showLoading = (sub) => {
-  loadingSub.textContent = sub || "Convirtiendo a Fragments";
-  loadingError.style.display = "none";
-  loadingBar.style.width = "0%";
-  loadingPct.textContent = "0%";
-  loadingEl.hidden = false;
+  if (loadingSub) loadingSub.textContent = sub || "Convirtiendo a Fragments";
+  if (loadingError) loadingError.style.display = "none";
+  if (loadingBar) loadingBar.style.width = "0%";
+  if (loadingPct) loadingPct.textContent = "0%";
+  if (loadingEl) loadingEl.hidden = false;
 };
 
 const hideLoading = () => {
-  loadingEl.hidden = true;
+  if (loadingEl) loadingEl.hidden = true;
 };
 
 const showLoadingError = (message) => {
-  loadingError.textContent = `Error: ${message}. Revisa la consola (F12).`;
-  loadingError.style.display = "block";
-  loadingPct.textContent = "Falló la carga";
+  if (loadingError) {
+    loadingError.textContent = `Error: ${message}. Revisa la consola (F12).`;
+    loadingError.style.display = "block";
+  }
+  if (loadingPct) loadingPct.textContent = "Falló la carga";
 };
 
 const isMobile = () => window.matchMedia("(max-width: 899px)").matches;
 
 const openPanel = () => {
-  panel.classList.add("open");
-  panelOpenBtn.classList.add("hidden");
+  if (panel) panel.classList.add("open");
+  if (panelOpenBtn) panelOpenBtn.classList.add("hidden");
 };
 
 const closePanel = () => {
-  panel.classList.remove("open");
-  panelOpenBtn.classList.remove("hidden");
+  if (panel) panel.classList.remove("open");
+  if (panelOpenBtn) panelOpenBtn.classList.remove("hidden");
 };
 
-panelOpenBtn.addEventListener("click", openPanel);
-panelCloseBtn.addEventListener("click", closePanel);
+panelOpenBtn?.addEventListener("click", openPanel);
+panelCloseBtn?.addEventListener("click", closePanel);
 
 /* ------------------------------------------------------------------ */
 /*  App                                                                */
@@ -86,23 +91,37 @@ const init = async () => {
   const components = new OBC.Components();
 
   const worlds = components.get(OBC.Worlds);
-  const world = worlds.create({
-    scene: OBC.SimpleScene,
-    camera: OBC.OrthoPerspectiveCamera,
-    renderer: OBC.SimpleRenderer,
-  });
+  const world = worlds.create();
 
   world.scene = new OBC.SimpleScene(components);
   world.scene.setup();
-  world.scene.three.background = null;
 
-  world.renderer = new OBC.SimpleRenderer(components, container);
+  // Fondo por defecto
+  let bgDark = document.body.classList.contains("dark");
+  world.scene.three.background = new THREE.Color(bgDark ? 0x0b1120 : 0xf8fafc);
+
+  // Buffer de profundidad logarítmico para eliminar temblores (Z-fighting)
+  world.renderer = new OBC.SimpleRenderer(components, container, {
+    antialias: true,
+    logarithmicDepthBuffer: true,
+    powerPreference: "high-performance",
+  });
   world.renderer.showLogo = false;
   world.renderer.three.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+  // Cámara con planos near/far equilibrados
   world.camera = new OBC.OrthoPerspectiveCamera(components);
+  world.camera.three.near = 0.2;
+  world.camera.three.far = 4000;
+  world.camera.three.updateProjectionMatrix();
+
+  // Suavizado y amortiguación estable de la cámara (sin micro-vibraciones)
   world.camera.controls.enableRotate = true;
   world.camera.controls.enablePan = true;
   world.camera.controls.enableZoom = true;
+  world.camera.controls.restThreshold = 0.001;
+  world.camera.controls.smoothTime = 0.12;
+  world.camera.controls.dollyToCursor = true;
 
   components.init();
 
@@ -113,12 +132,28 @@ const init = async () => {
   }
 
   const fragments = components.get(OBC.FragmentsManager);
-  fragments.init(`${APP_BASE}fragments-worker.mjs`);
+  const ensureFragments = () => {
+    if (!fragments.initialized) {
+      fragments.init(`${APP_BASE}fragments-worker.mjs`);
+    }
+  };
+  ensureFragments();
 
   const ifcLoader = components.get(OBC.IfcLoader);
   ifcLoader.onIfcImporterInitialized.add((importer) => {
     importer.includeUniqueAttributes = true;
   });
+
+  try {
+    await ifcLoader.setup({
+      autoSetWasm: false,
+      wasm: { path: APP_BASE, absolute: true },
+    });
+  } catch (error) {
+    console.error(error);
+    showLoadingError(`No se pudo inicializar web-ifc: ${error?.message || error}`);
+    return;
+  }
 
   const caster = components.get(OBC.Raycasters).get(world);
   const highlighter = components.get(OBF.Highlighter);
@@ -149,24 +184,49 @@ const init = async () => {
 
   let modelBox = null;
   let buildingBox = null;
-  let mapMode = "osm";
-  let mapGroup = null;
-  let mapSize = 200;
-  let mapZ = 0;
   let currentView = "iso";
   let currentSelection = null;
   let isolatedIds = null;
   let layerItems = {}; // categoria -> number[]
   let hiddenCats = new Set();
   let activeModel = null;
-  let geoOrigin = { E: SITE_E, N: SITE_N, elev: SITE_ELEV };
-  let center = utmToLatLon(geoOrigin.E, geoOrigin.N, ZONE, true);
+  let mapMode = "none"; // "none" | "satellite" | "osm"
+  let mapGroup = null;
+  let mapSize = 350;
+  let mapZ = -0.1;
 
-  const updateGeoHint = () => {
-    center = utmToLatLon(geoOrigin.E, geoOrigin.N, ZONE, true);
-    geoHint.textContent = `UTM 19S · EPSG:32719 · ${center.lat.toFixed(5)}, ${center.lon.toFixed(5)}`;
+  // Estado dinámico de georreferencia: inicia en null si no hay modelo
+  let geoOrigin = null;
+  let center = null;
+
+  const applyGeoreference = (georef) => {
+    if (georef && georef.hasGeoref) {
+      geoOrigin = {
+        E: georef.E,
+        N: georef.N,
+        elev: georef.elev,
+        zone: georef.zone || ZONE,
+        isSouth: georef.isSouth !== false,
+      };
+      center = { lat: georef.lat, lon: georef.lon };
+      if (geoHint) {
+        geoHint.textContent = `${georef.crs || `UTM ${geoOrigin.zone}${geoOrigin.isSouth ? "S" : "N"}`} · ${center.lat.toFixed(5)}°, ${center.lon.toFixed(5)}°`;
+      }
+    } else {
+      geoOrigin = null;
+      center = null;
+      if (geoHint) {
+        geoHint.textContent = "Modelo local (sin georreferencia GPS/UTM)";
+      }
+      if (mapMode !== "none") {
+        setMapMode("none");
+      }
+    }
   };
-  updateGeoHint();
+
+  // Etiquetas BIM (sobreimpresiones en la vista 3D)
+  const bimLabels = document.getElementById("bim-labels");
+  let selectedLabelEl = null;
 
   /* ------------------------ vistas ------------------------- */
 
@@ -179,7 +239,6 @@ const init = async () => {
   const UP_Y = new THREE.Vector3(0, 1, 0);
   const UP_NORTH = new THREE.Vector3(0, 0, -1);
 
-  // camera-controls necesita que se le avise cuando cambia el up de la camara.
   const setCameraUp = (up) => {
     const cam = world.camera.three;
     if (cam.up.distanceToSquared(up) < 1e-10) return;
@@ -196,11 +255,10 @@ const init = async () => {
 
     const centerBox = box.getCenter(new THREE.Vector3());
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const anchor = centerBox.clone().addScaledVector(normal, Math.max(sphere.radius * 3, 10));
+    const anchor = centerBox.clone().addScaledVector(normal, Math.max(sphere.radius * 2.8, 10));
 
-    controls.setLookAt(anchor.x, anchor.y, anchor.z, centerBox.x, centerBox.y, centerBox.z, false);
+    controls.setLookAt(anchor.x, anchor.y, anchor.z, centerBox.x, centerBox.y, centerBox.z, true);
 
-    // extensiones de la caja en el plano de la camara
     const zAxis = normal.clone();
     let xAxis = new THREE.Vector3().crossVectors(up, zAxis);
     if (xAxis.lengthSq() < 1e-8) xAxis.set(1, 0, 0);
@@ -235,20 +293,11 @@ const init = async () => {
       const w = cam.right - cam.left;
       const h = cam.top - cam.bottom;
       if (isFinite(w) && isFinite(h) && w > 0 && h > 0) {
-        controls.zoomTo(Math.min(w / extX, h / extY), false);
+        controls.zoomTo(Math.min(w / extX, h / extY), true);
       }
     } else {
       const dist = controls.getDistanceToFitBox(extX, extY, extZ, false);
-      if (isFinite(dist) && dist > 0) controls.dollyTo(dist, false);
-      if (!isFinite(cam.zoom)) {
-        cam.zoom = 1;
-        cam.updateProjectionMatrix();
-      }
-      const need = dist + sphere.radius * 2 + 100;
-      if (isFinite(need) && cam.far < need) {
-        cam.far = need;
-        cam.updateProjectionMatrix();
-      }
+      if (isFinite(dist) && dist > 0) controls.dollyTo(dist, true);
     }
   };
 
@@ -261,7 +310,6 @@ const init = async () => {
     return box;
   };
 
-  // Encuadra el edificio por defecto; "Encuadrar" muestra todo el sitio.
   const applyView = (kind = currentView, box = null) => {
     currentView = kind;
     const target = box || buildingBox || modelBox || getModelBox();
@@ -275,12 +323,11 @@ const init = async () => {
     chip.addEventListener("click", () => applyView(chip.dataset.view));
   });
 
-  fitBtn.addEventListener("click", () => {
+  fitBtn?.addEventListener("click", () => {
     modelBox = getModelBox();
     applyView(currentView, modelBox);
   });
 
-  // Caja ajustada del edificio (sin muros perimetrales ni terreno).
   const BUILDING_BOX_CATS =
     /^(IFCSLAB|IFCROOF|IFCCOVERING|IFCCOLUMN|IFCBEAM|IFCMEMBER|IFCDOOR|IFCWINDOW|IFCSTAIR|IFCRAILING)/;
 
@@ -302,7 +349,31 @@ const init = async () => {
     }
   };
 
-  /* ------------------------ mapa OSM ----------------------- */
+  /* ------------------------ fondo claro / oscuro ----------------------- */
+
+  const setBg = (dark) => {
+    bgDark = dark;
+    document.body.classList.toggle("dark", dark);
+    document.body.classList.toggle("light", !dark);
+    world.scene.three.background = new THREE.Color(bgDark ? 0x0b1120 : 0xf8fafc);
+    bgChips.forEach((c) => c.classList.toggle("active", c.dataset.bg === (dark ? "dark" : "light")));
+    setThemeIcon(dark);
+  };
+
+  themeBtn?.addEventListener("click", () => setBg(!bgDark));
+
+  bgChips.forEach((chip) => {
+    chip.addEventListener("click", () => setBg(chip.dataset.bg === "dark"));
+  });
+
+  const setThemeIcon = (dark) => {
+    if (!themeBtn) return;
+    themeBtn.textContent = dark ? "☀️" : "🌙";
+    themeBtn.setAttribute("title", dark ? "Cambiar a modo claro" : "Cambiar a modo oscuro");
+  };
+  setThemeIcon(bgDark);
+
+  /* ------------------------ mapa base (Satélite / OSM) ----------------------- */
 
   const clearMap = () => {
     if (!mapGroup) return;
@@ -319,34 +390,91 @@ const init = async () => {
 
   const refreshMap = () => {
     clearMap();
-    // La rejilla CAD solo tiene sentido sin mapa base.
-    if (grid?.three) grid.three.visible = mapMode !== "osm";
-    if (mapMode !== "osm" || !modelBox) return;
-    status("Cargando mapa OSM…");
+    if (grid?.three) grid.three.visible = mapMode === "none";
+    if (mapMode === "none" || !modelBox || !geoOrigin || !center) return;
+
+    status(`Cargando ${mapMode === "satellite" ? "Google Satélite" : "OpenStreetMap"}…`);
     mapGroup = buildBaseMap({
+      type: mapMode,
       centerLat: center.lat,
       centerLon: center.lon,
       sizeMeters: mapSize,
       mapZ,
       anchorE: geoOrigin.E,
       anchorN: geoOrigin.N,
+      zone: geoOrigin.zone,
+      south: geoOrigin.isSouth,
       onTile: () => {
-        status("Mapa OSM alineado con el modelo.");
+        status("Mapa base alineado con el modelo.");
       },
     });
     world.scene.three.add(mapGroup);
   };
 
   const setMapMode = (mode) => {
+    if (mode !== "none" && (!geoOrigin || !center)) {
+      status("Este modelo IFC no contiene datos de georreferencia GPS/UTM.");
+      mapMode = "none";
+      mapChips.forEach((c) => c.classList.toggle("active", c.dataset.map === "none"));
+      clearMap();
+      return;
+    }
     mapMode = mode;
     mapChips.forEach((c) => c.classList.toggle("active", c.dataset.map === mode));
     refreshMap();
-    if (mode === "none") status("Mapa base oculto.");
+    if (mode === "none") status("Mapa base apagado.");
   };
 
   mapChips.forEach((chip) => {
     chip.addEventListener("click", () => setMapMode(chip.dataset.map));
   });
+
+  /* ------------------------ etiquetas BIM ----------------------- */
+
+  const createLabelEl = (text) => {
+    const el = document.createElement("div");
+    el.className = "bim-label";
+    el.textContent = text;
+    el.style.position = "absolute";
+    el.style.padding = "4px 8px";
+    el.style.borderRadius = "6px";
+    el.style.background = "rgba(37, 99, 235, 0.92)";
+    el.style.color = "#fff";
+    el.style.fontSize = "11px";
+    el.style.fontWeight = "600";
+    el.style.pointerEvents = "none";
+    el.style.whiteSpace = "nowrap";
+    el.style.transform = "translate(-50%, -100%)";
+    el.style.zIndex = "20";
+    el.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
+    return el;
+  };
+
+  const clearBimLabels = () => {
+    if (selectedLabelEl) {
+      selectedLabelEl.remove();
+      selectedLabelEl = null;
+    }
+  };
+
+  const updateBimLabelsPosition = () => {
+    if (!selectedLabelEl || !selectedPickPoint) return;
+    const camera = world.camera.three;
+    const pos = selectedPickPoint.clone();
+    pos.project(camera);
+    if (pos.z > 1) {
+      selectedLabelEl.style.display = "none";
+      return;
+    }
+    const x = ((pos.x + 1) / 2) * window.innerWidth;
+    const y = ((1 - pos.y) / 2) * window.innerHeight;
+    selectedLabelEl.style.left = `${x}px`;
+    selectedLabelEl.style.top = `${y}px`;
+    selectedLabelEl.style.display = "block";
+  };
+
+  // Escuchar movimiento de la cámara sin sobrecargar el hilo de render
+  world.camera.controls.addEventListener("update", updateBimLabelsPosition);
 
   /* ------------------------ capas -------------------------- */
 
@@ -367,10 +495,9 @@ const init = async () => {
 
   const buildLayers = async (model) => {
     layerItems = {};
-    // El terreno IFC es enorme y tapa el edificio; se activa a demanda.
-    hiddenCats = new Set(["IFCGEOGRAPHICELEMENT"]);
-    layersEl.innerHTML = "";
-    layersCountEl.textContent = "";
+    hiddenCats = new Set();
+    if (layersEl) layersEl.innerHTML = "";
+    if (layersCountEl) layersCountEl.textContent = "";
 
     let items = [];
     let cats = [];
@@ -384,7 +511,6 @@ const init = async () => {
       return;
     }
 
-    // Ambas listas vienen alineadas por indice; _localId ya esta resuelto.
     const groups = LAYER_DEFS.map((def) => ({ ...def, ids: [], cats: [] }));
     const byCat = new Map();
 
@@ -406,7 +532,7 @@ const init = async () => {
 
     const visibleGroups = groups.filter((g) => g.ids.length > 0);
     const total = visibleGroups.reduce((n, g) => n + g.ids.length, 0);
-    layersCountEl.textContent = `${total.toLocaleString("es-PE")} elementos`;
+    if (layersCountEl) layersCountEl.textContent = `${total.toLocaleString("es-PE")} elementos`;
 
     for (const group of visibleGroups) {
       const row = document.createElement("label");
@@ -415,9 +541,9 @@ const init = async () => {
       row.innerHTML = `
         <input type="checkbox" ${initiallyVisible ? "checked" : ""} />
         <span class="dot" style="background:${group.color}"></span>
-        <span class="name">${group.label}</span>
-        <span class="count">${group.ids.length}</span>
-        <span class="swatch"></span>
+        <span class="lname">${group.label}</span>
+        <span class="lcount">${group.ids.length}</span>
+        <span class="toggle"></span>
       `;
       if (!initiallyVisible) row.classList.add("off");
       const input = row.querySelector("input");
@@ -432,13 +558,12 @@ const init = async () => {
           await applyTerrainStyle(activeModel);
         }
       });
-      layersEl.appendChild(row);
+      if (layersEl) layersEl.appendChild(row);
     }
   };
 
   const applyVisibility = async () => {
     if (!activeModel) return;
-    // Dos llamadas en lote (ocultar y mostrar) en lugar de una por categoria.
     const show = [];
     const hide = [];
     for (const [cat, ids] of Object.entries(layerItems)) {
@@ -457,7 +582,6 @@ const init = async () => {
     await applyVisibility();
   };
 
-  // Terreno translucido (estilo BIM+GIS) para que nunca tape los muros.
   const applyTerrainStyle = async (model) => {
     const geoIds = layerItems["IFCGEOGRAPHICELEMENT"] || [];
     if (!geoIds.length) return;
@@ -478,7 +602,6 @@ const init = async () => {
   const refreshTerrainStyle = () => {
     if (!activeModel) return;
     if (hiddenCats.has("IFCGEOGRAPHICELEMENT")) return;
-    // El resaltado de Fragments puede devolver la opacidad original.
     setTimeout(() => applyTerrainStyle(activeModel), 180);
   };
 
@@ -494,8 +617,8 @@ const init = async () => {
     pinGroup.visible = true;
   };
 
-  // Punto exacto de un toque, para no depender de la ultima posicion del mouse.
   let pendingPickPoint = null;
+  let selectedPickPoint = null;
 
   highlighter.events.select.onHighlight.add(async (modelIdMap) => {
     currentSelection = modelIdMap;
@@ -505,15 +628,13 @@ const init = async () => {
     const model = fragments.list.get(modelId);
     if (!model) return;
 
-    // El punto del toque se consume de inmediato para que dos selecciones
-    // seguidas no se pisen entre si.
+    selectedPickPoint = pendingPickPoint ?? null;
     const pickPoint = pendingPickPoint;
     pendingPickPoint = null;
 
     const ids = Array.from(localIds);
     const [itemData] = await model.getItemsData(ids);
 
-    // Propiedades completas (psets, nivel y tipo) para el panel.
     let fullData = null;
     try {
       [fullData] = await model.getItemsData(ids, {
@@ -529,15 +650,16 @@ const init = async () => {
     }
 
     const hit = pickPoint ? { point: pickPoint } : await caster.castRay();
+    const point = hit ? hit.point : null;
+
+    // Coordenadas geograficas reales del elemento (si el IFC tiene georreferencia)
     let lat = null;
     let lon = null;
     let elev = null;
-    const point = hit ? hit.point : null;
-    if (point) {
-      // Marco local: +X este, +Y elevacion, -Z norte.
+    if (point && geoOrigin) {
       const easting = point.x + geoOrigin.E;
       const northing = geoOrigin.N - point.z;
-      const g = utmToLatLon(easting, northing, ZONE, true);
+      const g = utmToLatLon(easting, northing, geoOrigin.zone || ZONE, geoOrigin.isSouth !== false);
       lat = g.lat;
       lon = g.lon;
       elev = point.y + geoOrigin.elev;
@@ -552,6 +674,14 @@ const init = async () => {
       lon,
       elev,
     });
+
+    // Etiqueta flotante estable
+    clearBimLabels();
+    if (bimLabels && selectedPickPoint) {
+      selectedLabelEl = createLabelEl(itemData?.Name?.value || `Elemento ${ids[0]}`);
+      bimLabels.appendChild(selectedLabelEl);
+      updateBimLabelsPosition();
+    }
 
     popup.setOnZoom(async () => {
       const target = point || new THREE.Vector3();
@@ -587,6 +717,8 @@ const init = async () => {
 
   highlighter.events.select.onClear.add(async () => {
     currentSelection = null;
+    selectedPickPoint = null;
+    clearBimLabels();
     popup.hide();
     hidePin();
     if (isolatedIds) await clearIsolation();
@@ -595,13 +727,12 @@ const init = async () => {
 
   popup.setOnClose(async () => {
     hidePin();
+    clearBimLabels();
     if (isolatedIds) await clearIsolation();
   });
 
   /* -------------------- seleccion tactil ------------------- */
 
-  // El Highlighter solo escucha mousedown/mouseup; en tactil se resuelve el
-  // picking con pointer events y se reutiliza el punto exacto del toque.
   const canvas = world.renderer.three.domElement;
   let tapStart = null;
   const activeTouches = new Set();
@@ -611,7 +742,6 @@ const init = async () => {
     (event) => {
       if (event.pointerType === "mouse") return;
       activeTouches.add(event.pointerId);
-      // Un pinch (dos o mas dedos) nunca es un toque de seleccion.
       if (activeTouches.size > 1) {
         tapStart = null;
         return;
@@ -642,7 +772,6 @@ const init = async () => {
       const dy = event.clientY - tapStart.y;
       const elapsed = performance.now() - tapStart.time;
       tapStart = null;
-      // Solo toques cortos y sin arrastre (el resto es orbita/pan).
       if (Math.hypot(dx, dy) > 10 || elapsed > 800) return;
 
       const rect = canvas.getBoundingClientRect();
@@ -678,35 +807,18 @@ const init = async () => {
 
   /* ---------------------- carga IFC ------------------------ */
 
-  // La matriz de coordinacion del IFC da el origen real del modelo en UTM.
-  const syncGeoreference = async (model) => {
-    try {
-      const c = await model.getCoordinates();
-      if (Array.isArray(c) && c.length >= 3) {
-        const E = -c[0];
-        const elev = -c[1];
-        const N = c[2];
-        if (Number.isFinite(E) && Number.isFinite(N)) {
-          geoOrigin = { E, N, elev: Number.isFinite(elev) ? elev : SITE_ELEV };
-          updateGeoHint();
-        }
-      }
-    } catch (error) {
-      console.warn("Sin matriz de coordinacion; uso las constantes UTM.", error);
-    }
-  };
-
   const onModelReady = async (model, name) => {
     activeModel = model;
-    modelNameEl.textContent = name;
+    if (modelNameEl) modelNameEl.textContent = name;
     modelBox = getModelBox();
+    if (dropZone) dropZone.classList.add("hidden");
+
     if (modelBox) {
       const size = modelBox.getSize(new THREE.Vector3());
-      mapSize = Math.max(size.x, size.z) * 1.6;
-      mapZ = modelBox.min.y - 0.5;
+      mapSize = Math.max(size.x, size.z) * 2.2;
+      mapZ = modelBox.min.y - 0.15;
     }
 
-    await syncGeoreference(model);
     await buildLayers(model);
     buildingBox = await computeBuildingBox(model);
     await applyVisibility();
@@ -714,14 +826,51 @@ const init = async () => {
     if (isMobile()) closePanel();
     refreshMap();
 
-    status(
-      mapMode === "osm"
-        ? "Modelo cargado. Toca un elemento para consultar; usa el mapa OSM de base."
-        : "Modelo cargado. Toca un elemento para ver sus propiedades."
-    );
+    status("Modelo cargado. Toca un elemento para ver sus propiedades.");
+  };
+
+  // Limpieza segura del modelo anterior (sin destruir FragmentsManager)
+  const clearModel = async () => {
+    try {
+      if (highlighter) {
+        try { await highlighter.clear("select"); } catch {}
+      }
+      clearBimLabels();
+      if (activeModel) {
+        try { world.scene.three.remove(activeModel.object); } catch {}
+        try {
+          if (typeof activeModel.dispose === "function") {
+            await activeModel.dispose();
+          }
+        } catch {}
+        try {
+          if (fragments?.core?.models?.list) {
+            fragments.core.models.list.delete(activeModel.modelId);
+          }
+        } catch {}
+        activeModel = null;
+      }
+      modelBox = null;
+      buildingBox = null;
+      layerItems = {};
+      hiddenCats = new Set();
+      isolatedIds = null;
+      currentSelection = null;
+      selectedPickPoint = null;
+      try { popup.hide(); } catch {}
+      if (layersEl) layersEl.innerHTML = '<p class="layers-empty">Carga un modelo IFC<br>para ver las capas.</p>';
+      if (layersCountEl) layersCountEl.textContent = "";
+      if (modelNameEl) modelNameEl.textContent = "Sin modelo";
+      if (dropZone) dropZone.classList.remove("hidden");
+      clearMap();
+      status("Listo. Carga un modelo IFC para comenzar.");
+    } catch (error) {
+      console.warn("clearModel:", error);
+    }
   };
 
   const loadIfcBuffer = async (buffer, name) => {
+    ensureFragments();
     const model = await ifcLoader.load(buffer, false, name, {
       processData: {
         progressCallback: (progress) => setLoadingProgress(progress),
@@ -732,8 +881,15 @@ const init = async () => {
 
   const loadAndFit = async (buffer, name, opts = {}) => {
     try {
-      showLoading(`Convirtiendo ${name} a Fragments…`);
+      await clearModel();
+      showLoading(`Analizando ${name}…`);
       hidePin();
+
+      // Extraer y aplicar georreferencia real del archivo IFC
+      const georef = extractIfcGeoreference(buffer);
+      applyGeoreference(georef);
+
+      showLoading(`Convirtiendo ${name} a Fragments…`);
       const model = await loadIfcBuffer(buffer, name);
       if (model?.object && !model.object.parent) {
         world.scene.three.add(model.object);
@@ -749,8 +905,10 @@ const init = async () => {
     }
   };
 
-  loadFileBtn.addEventListener("click", () => fileInput.click());
-  fileInput.addEventListener("change", async () => {
+  loadFileBtn?.addEventListener("click", () => fileInput?.click());
+  loadFile2Btn?.addEventListener("click", () => fileInput?.click());
+
+  fileInput?.addEventListener("change", async () => {
     const file = fileInput.files?.[0];
     if (!file) return;
     const name = file.name.replace(/\.ifc$/i, "") || "modelo";
@@ -759,19 +917,33 @@ const init = async () => {
     fileInput.value = "";
   });
 
-  /* ----------------------- render -------------------------- */
+  // Drag and drop en ventana completa
+  window.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    if (dropZone) dropZone.classList.add("drag-over");
+  });
+  window.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    if (dropZone) dropZone.classList.remove("drag-over");
+  });
+  window.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    if (dropZone) dropZone.classList.remove("drag-over");
+    const file = e.dataTransfer?.files?.[0];
+    if (!file || !/\.ifc$/i.test(file.name)) return;
+    const name = file.name.replace(/\.ifc$/i, "") || "modelo";
+    const buffer = new Uint8Array(await file.arrayBuffer());
+    await loadAndFit(buffer, name);
+  });
 
-  const animate = () => {
-    requestAnimationFrame(animate);
-    world.renderer.update();
-  };
-  animate();
+  /* ----------------------- resize -------------------------- */
 
   const resize = () => {
     const { clientWidth, clientHeight } = container;
     world.camera.three.aspect = clientWidth / clientHeight;
     world.camera.three.updateProjectionMatrix();
     world.renderer.three.setSize(clientWidth, clientHeight);
+    updateBimLabelsPosition();
   };
 
   resize();
@@ -779,30 +951,9 @@ const init = async () => {
   window.addEventListener("orientationchange", () => setTimeout(resize, 250));
 
   /* ----------------------- arranque ------------------------ */
+  status("Listo. Carga un modelo IFC para comenzar.");
 
-  try {
-    await ifcLoader.setup({
-      autoSetWasm: false,
-      wasm: { path: APP_BASE, absolute: true },
-    });
-  } catch (error) {
-    console.error(error);
-    showLoadingError(`No se pudo inicializar web-ifc: ${error?.message || error}`);
-    return;
-  }
-
-  showLoading("Cargando modelo IFC…");
-  try {
-    const file = await fetch(ifcUrl);
-    if (!file.ok) throw new Error(`No se pudo descargar proyecto.ifc (HTTP ${file.status})`);
-    const data = await file.arrayBuffer();
-    await loadAndFit(new Uint8Array(data), "proyecto");
-  } catch (error) {
-    console.error(error);
-    showLoadingError(error?.message || String(error));
-  }
-
-  window.__bim = { components, world, fragments, ifcLoader, THREE, OBC, OBF, popup, metaFor };
+  window.__bim = { components, world, fragments, ifcLoader, THREE, OBC, OBF, popup, metaFor, clearModel, loadAndFit };
 };
 
 init();
