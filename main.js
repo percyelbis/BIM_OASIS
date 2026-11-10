@@ -516,7 +516,7 @@ const init = async () => {
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const id = item?._localId ?? item?.localId ?? item?.id;
+      const id = typeof item === "number" ? item : (item?._localId ?? item?.localId ?? item?.id);
       const cat = String(cats[i] ?? "").toUpperCase();
       if (id == null) continue;
       if (!byCat.has(cat)) byCat.set(cat, []);
@@ -543,18 +543,19 @@ const init = async () => {
         <span class="dot" style="background:${group.color}"></span>
         <span class="lname">${group.label}</span>
         <span class="lcount">${group.ids.length}</span>
-        <span class="toggle"></span>
+        <span class="toggle" aria-hidden="true"></span>
       `;
       if (!initiallyVisible) row.classList.add("off");
       const input = row.querySelector("input");
       input.addEventListener("change", async () => {
-        row.classList.toggle("off", !input.checked);
+        const isChecked = input.checked;
+        row.classList.toggle("off", !isChecked);
         for (const cat of group.cats) {
-          if (input.checked) hiddenCats.delete(cat);
+          if (isChecked) hiddenCats.delete(cat);
           else hiddenCats.add(cat);
         }
         await applyVisibility();
-        if (input.checked && group.label.startsWith("Terreno")) {
+        if (isChecked && group.label.startsWith("Terreno")) {
           await applyTerrainStyle(activeModel);
         }
       });
@@ -573,8 +574,26 @@ const init = async () => {
         for (const id of ids) (isolatedIds.has(id) ? show : hide).push(id);
       }
     }
-    if (hide.length) await activeModel.setVisible(hide, false);
-    if (show.length) await activeModel.setVisible(show, true);
+
+    try {
+      const hider = components.get(OBC.Hider);
+      if (hide.length) await hider.set(false, { [activeModel.modelId]: hide });
+      if (show.length) await hider.set(true, { [activeModel.modelId]: show });
+    } catch {
+      // Fallback directo a activeModel
+      if (hide.length) await activeModel.setVisible(hide, false);
+      if (show.length) await activeModel.setVisible(show, true);
+    }
+
+    // Crucial: forzar la actualización de los buffers de Three.js en GPU
+    try {
+      const fragments = components.get(OBC.FragmentsManager);
+      if (fragments?.core) {
+        await fragments.core.update(true);
+      }
+    } catch (e) {
+      console.warn("fragments.core.update error:", e);
+    }
   };
 
   const clearIsolation = async () => {

@@ -211,10 +211,26 @@
       box-shadow: 0 1px 3px rgba(0,0,0,0.25);
       transition: transform .18s, background .18s;
     }
-    .layer input:checked + .toggle { background: var(--accent); border-color: transparent; }
-    .layer input:checked + .toggle::after { transform: translateX(12px); background: #fff; }
-    .layer.off .lname { color: var(--muted); }
-    .layer.off .dot   { opacity: .3; }
+    .layer input:checked ~ .toggle,
+    .layer:not(.off) .toggle {
+      background: var(--accent);
+      border-color: transparent;
+    }
+    .layer input:checked ~ .toggle::after,
+    .layer:not(.off) .toggle::after {
+      transform: translateX(12px);
+      background: #ffffff;
+    }
+    .layer.off .toggle {
+      background: var(--card);
+      border-color: var(--line);
+    }
+    .layer.off .toggle::after {
+      transform: translateX(0);
+      background: var(--muted);
+    }
+    .layer.off .lname { color: var(--muted); opacity: 0.6; }
+    .layer.off .dot   { opacity: .25; }
 
     .layers-empty {
       font-size: 11.5px; color: var(--muted);
