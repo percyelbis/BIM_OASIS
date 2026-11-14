@@ -525,34 +525,28 @@
 
     /* ═══ YOUTUBE BADGE ════════════════════════════════════════ */
     #yt-badge {
-      position: fixed;
-      bottom: max(14px, env(safe-area-inset-bottom));
-      right: max(14px, env(safe-area-inset-right));
-      z-index: 60;
+      flex-shrink: 0;
       display: flex;
       align-items: center;
-      gap: 7px;
-      padding: 7px 11px 7px 9px;
-      background: var(--surface);
-      backdrop-filter: var(--blur);
-      -webkit-backdrop-filter: var(--blur);
-      border: 1px solid var(--line);
+      gap: 6px;
+      padding: 5px 9px 5px 7px;
+      background: rgba(255, 0, 0, .055);
+      border: 1px solid rgba(255, 0, 0, .16);
       border-radius: 999px;
-      box-shadow: var(--shadow);
       text-decoration: none;
       color: var(--text);
       font-size: 11.5px;
       font-weight: 600;
       white-space: nowrap;
-      transition: transform .15s, box-shadow .15s, opacity .15s;
+      transition: transform .15s, background .15s, border-color .15s;
       cursor: pointer;
       user-select: none;
       -webkit-user-select: none;
     }
     #yt-badge:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 28px rgba(255,0,0,0.18), var(--shadow);
-      opacity: 1;
+      background: rgba(255, 0, 0, .1);
+      border-color: rgba(255, 0, 0, .28);
+      transform: translateY(-1px);
     }
     #yt-badge .yt-logo {
       width: 22px; height: 22px; flex-shrink: 0;
@@ -568,9 +562,12 @@
       font-size: 11px; font-weight: 700; color: var(--text);
     }
     @media (max-width: 899px) {
-      #yt-badge { bottom: max(10px, env(safe-area-inset-bottom)); right: max(10px, env(safe-area-inset-right)); padding: 6px 10px 6px 8px; }
+      #yt-badge {
+        width: 32px; height: 32px; padding: 0;
+        justify-content: center; border-radius: 9px;
+      }
+      #yt-badge .yt-text { display: none; }
       #yt-badge .yt-logo { width: 20px; height: 20px; }
-      #yt-badge .yt-name { font-size: 10px; }
     }
   </style>
 </head>
@@ -587,6 +584,19 @@
         <strong>BIM·3D</strong>
         <span id="model-name">Sin modelo</span>
       </div>
+      <!-- ═══ YOUTUBE BADGE ══════════════════════════════════════ -->
+      <a id="yt-badge" href="https://www.youtube.com/@percyquasar" target="_blank" rel="noopener noreferrer" title="Síguenos en YouTube: @percyquasar" aria-label="YouTube: Síguenos en @percyquasar">
+        <!-- Ícono SVG oficial de YouTube (rojo) -->
+        <svg class="yt-logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect width="24" height="24" rx="6" fill="#FF0000"/>
+          <path d="M19.6 8.2a2 2 0 0 0-1.4-1.4C16.9 6.5 12 6.5 12 6.5s-4.9 0-6.2.3A2 2 0 0 0 4.4 8.2 20 20 0 0 0 4 12a20 20 0 0 0 .4 3.8 2 2 0 0 0 1.4 1.4c1.3.3 6.2.3 6.2.3s4.9 0 6.2-.3a2 2 0 0 0 1.4-1.4A20 20 0 0 0 20 12a20 20 0 0 0-.4-3.8z" fill="white"/>
+          <path d="M10.5 14.5v-5l4.5 2.5-4.5 2.5z" fill="#FF0000"/>
+        </svg>
+        <div class="yt-text">
+          <span class="yt-label">Síguenos en</span>
+          <span class="yt-name">@percyquasar</span>
+        </div>
+      </a>
     </div>
     <div class="top-actions">
       <button class="icon-btn" id="btn-fit"   title="Encuadrar modelo"  aria-label="Encuadrar">⤢</button>
@@ -705,19 +715,7 @@
     </div>
   </div>
 
-  <!-- ═══ YOUTUBE BADGE ══════════════════════════════════════════ -->
-  <a id="yt-badge" href="https://www.youtube.com/@percyquasar" target="_blank" rel="noopener noreferrer" title="Visitar canal de YouTube">
-    <!-- Ícono SVG oficial de YouTube (rojo) -->
-    <svg class="yt-logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect width="24" height="24" rx="6" fill="#FF0000"/>
-      <path d="M19.6 8.2a2 2 0 0 0-1.4-1.4C16.9 6.5 12 6.5 12 6.5s-4.9 0-6.2.3A2 2 0 0 0 4.4 8.2 20 20 0 0 0 4 12a20 20 0 0 0 .4 3.8 2 2 0 0 0 1.4 1.4c1.3.3 6.2.3 6.2.3s4.9 0 6.2-.3a2 2 0 0 0 1.4-1.4A20 20 0 0 0 20 12a20 20 0 0 0-.4-3.8z" fill="white"/>
-      <path d="M10.5 14.5v-5l4.5 2.5-4.5 2.5z" fill="#FF0000"/>
-    </svg>
-    <div class="yt-text">
-      <span class="yt-label">Síguenos en</span>
-      <span class="yt-name">@percyquasar</span>
-    </div>
-  </a>
+  <!-- ═══ YOUTUBE BADGE (dentro del topbar, junto a BIM·3D) ═══════ -->
 
   <script type="module" src="/main.js"></script>
 </body>
