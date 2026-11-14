@@ -177,9 +177,11 @@ export function extractIfcGeoreference(ifcBufferOrText) {
         if (parts.length >= 3) {
           const sign = parts[0] < 0 || Object.is(parts[0], -0) ? -1 : 1;
           const d = Math.abs(parts[0]);
-          const m = parts[1] || 0;
-          const s = parts[2] || 0;
-          const u = parts[3] || 0;
+          // IFC suele escribir todos los componentes con el mismo signo:
+          // (-13,-40,-32,-750000). Minutos/segundos deben ir en valor absoluto.
+          const m = Math.abs(parts[1] || 0);
+          const s = Math.abs(parts[2] || 0);
+          const u = Math.abs(parts[3] || 0);
           return sign * (d + m / 60 + (s + u / 1000000) / 3600);
         }
         return null;

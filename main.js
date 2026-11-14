@@ -109,11 +109,14 @@ const init = async () => {
   world.renderer.showLogo = false;
   world.renderer.three.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
-  // Cámara con planos near/far equilibrados
+  // Cámara con planos near/far dinámicos (se recalculan al encuadrar cada modelo)
   world.camera = new OBC.OrthoPerspectiveCamera(components);
-  world.camera.three.near = 0.2;
+  world.camera.three.near = 0.1;
   world.camera.three.far = 4000;
   world.camera.three.updateProjectionMatrix();
+  // OrbitMode limita la distancia a 300; los modelos grandes necesitan más.
+  world.camera.controls.maxDistance = 1e6;
+  world.camera.controls.minDistance = 0.05;
 
   // Suavizado y amortiguación estable de la cámara (sin micro-vibraciones)
   world.camera.controls.enableRotate = true;
@@ -255,9 +258,12 @@ const init = async () => {
 
     const centerBox = box.getCenter(new THREE.Vector3());
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const anchor = centerBox.clone().addScaledVector(normal, Math.max(sphere.radius * 2.8, 10));
+    const radius = Math.max(sphere.radius, 1);
 
-    controls.setLookAt(anchor.x, anchor.y, anchor.z, centerBox.x, centerBox.y, centerBox.z, true);
+    // Los modelos grandes (manzanas completas) superan el límite de 300 que
+    // impone el modo órbita por defecto. Ajustamos los límites al tamaño real.
+    controls.minDistance = Math.max(0.05, radius / 20000);
+    controls.maxDistance = Math.max(350, radius * 20);
 
     const zAxis = normal.clone();
     let xAxis = new THREE.Vector3().crossVectors(up, zAxis);
@@ -272,7 +278,7 @@ const init = async () => {
     for (const x of [box.min.x, box.max.x]) {
       for (const y of [box.min.y, box.max.y]) {
         for (const z of [box.min.z, box.max.z]) {
-          v.set(x, y, z).sub(anchor);
+          v.set(x, y, z).sub(centerBox);
           const px = v.dot(xAxis);
           const py = v.dot(yAxis);
           const pz = v.dot(zAxis);
@@ -289,15 +295,31 @@ const init = async () => {
     const extY = Math.max(maxY - minY, 1e-6);
     const extZ = Math.max(maxZ - minZ, 1e-6);
 
+    let distance;
     if (cam.isOrthographicCamera) {
+      distance = Math.max(radius * 3, 10);
       const w = cam.right - cam.left;
       const h = cam.top - cam.bottom;
       if (isFinite(w) && isFinite(h) && w > 0 && h > 0) {
-        controls.zoomTo(Math.min(w / extX, h / extY), true);
+        controls.zoomTo(Math.min(w / extX, h / extY), false);
       }
     } else {
-      const dist = controls.getDistanceToFitBox(extX, extY, extZ, false);
-      if (isFinite(dist) && dist > 0) controls.dollyTo(dist, true);
+      const fit = controls.getDistanceToFitBox(extX, extY, extZ, false);
+      distance = isFinite(fit) && fit > 0 ? fit * 1.04 : Math.max(radius * 2.8, 10);
+    }
+
+    // Colocar la cámara directamente (sin transición) evita que setLookAt y
+    // dollyTo compitan y dejen la cámara dentro del modelo.
+    const anchor = centerBox.clone().addScaledVector(normal, distance);
+    controls.setLookAt(anchor.x, anchor.y, anchor.z, centerBox.x, centerBox.y, centerBox.z, false);
+
+    // Planos de recorte acordes al modelo y al máximo zoom de alejamiento.
+    const near = Math.max(0.01, radius / 100000);
+    const far = Math.max(4000, controls.maxDistance + radius * 6);
+    if (cam.near !== near || cam.far !== far) {
+      cam.near = near;
+      cam.far = far;
+      cam.updateProjectionMatrix();
     }
   };
 
