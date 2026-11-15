@@ -26,6 +26,11 @@ const MEP_CAT =
 
 const PROXY_CAT = /^IFCBUILDINGELEMENTPROXY/;
 
+// Categorías que definen una planta arquitectónica útil. Se usan para
+// elegir el nivel inicial (el que más muros, vanos y estructura tiene).
+const PLAN_PRIMARY =
+  /^(IFCWALL|IFCDOOR|IFCWINDOW|IFCSLAB|IFCCOLUMN|IFCBEAM|IFCSTAIR|IFCROOF|IFCCOVERING|IFCCURTAINWALL|IFCPLATE|IFCMEMBER|IFCRAILING)/;
+
 const LAYER_VISIBLE = "PLANTA";
 const LAYER_HIDDEN = "OCULTAS";
 
@@ -654,6 +659,23 @@ export function createPlanManager({ components, world, getModel, getModelName, g
         },
       ];
     }
+
+    // Nivel inicial: el que más elementos arquitectónicos tiene. Evita
+    // abrir en una plataforma vacía o en una cubierta.
+    let bestIndex = 0;
+    let bestScore = -1;
+    state.levels.forEach((level, idx) => {
+      let score = 0;
+      for (const id of level.ids) {
+        if (PLAN_PRIMARY.test(catMap.get(id) || "")) score++;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = idx;
+      }
+    });
+    state.selected = bestIndex;
+
     return state.levels;
   };
 
@@ -1331,8 +1353,7 @@ export function createPlanManager({ components, world, getModel, getModelName, g
         await detectLevels();
         renderLevelOptions();
         if (state.levels.length) {
-          state.selected = 0;
-          setStatus(`${state.levels.length} niveles detectados. Generando el primero…`);
+          setStatus(`${state.levels.length} niveles detectados. Generando ${state.levels[state.selected]?.name || "el nivel principal"}…`);
           hideProgress();
           state.levelsLoading = false;
           await generate();
