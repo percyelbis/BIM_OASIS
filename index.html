@@ -7,6 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <title>BIM·3D Viewer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232563eb'/><text x='50' y='70' font-size='62' font-weight='bold' text-anchor='middle' fill='white' font-family='Arial'>B</text></svg>" />
   <style>
     /* ═══ TOKENS ══════════════════════════════════════════════ */
     :root {
@@ -523,6 +524,248 @@
       #geo-popup { max-height: 85dvh; }
     }
 
+    /* ═══ PLANOS 2D ═════════════════════════════════════════════ */
+    #plan-modal {
+      position: fixed; inset: 0; z-index: 300;
+      display: grid; place-items: center;
+      padding: 14px;
+      background: rgba(15,23,42,.55);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    #plan-modal[hidden] { display: none !important; }
+
+    .plan-shell {
+      width: min(1480px, 100%);
+      height: min(94dvh, 100%);
+      display: flex; flex-direction: column;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 30px 80px rgba(0,0,0,.35);
+    }
+
+    .plan-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 10px; padding: 10px 14px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+      flex-shrink: 0;
+    }
+    .plan-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .plan-kicker {
+      font-size: 9.5px; font-weight: 800; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--accent);
+      white-space: nowrap;
+    }
+    .plan-title strong {
+      font-size: 13px; font-weight: 700; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .plan-head-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+    .plan-toolbar {
+      display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap;
+      padding: 8px 12px;
+      background: var(--solid);
+      border-bottom: 1px solid var(--line);
+      flex-shrink: 0;
+    }
+    .plan-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .plan-field > span {
+      font-size: 8.5px; font-weight: 800; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--muted);
+    }
+    .plan-field select {
+      height: 32px; min-width: 80px; max-width: 210px;
+      padding: 0 26px 0 9px;
+      border-radius: 8px; border: 1px solid var(--line);
+      background: var(--card); color: var(--text);
+      font-family: inherit; font-size: 12px; font-weight: 600;
+      outline: none; cursor: pointer;
+    }
+    .plan-field select:focus { border-color: var(--accent); }
+    .plan-check {
+      display: flex; align-items: center; gap: 5px;
+      height: 32px; padding: 0 7px;
+      font-size: 11.5px; font-weight: 600; color: var(--sub);
+      border: 1px solid var(--line); border-radius: 8px;
+      background: var(--card); cursor: pointer;
+      user-select: none; white-space: nowrap;
+    }
+    .plan-check input { accent-color: var(--accent); margin: 0; }
+    .plan-toolbar .btn-cta { height: 32px; }
+    .plan-toolbar .btn-cta.dirty {
+      animation: plan-pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes plan-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(37,99,235,.35); }
+      50%      { box-shadow: 0 0 0 6px rgba(37,99,235,0); }
+    }
+    .plan-spacer { flex: 1; min-width: 4px; }
+    .plan-action {
+      height: 32px; padding: 0 11px; border-radius: 8px;
+      border: 1px solid var(--line); background: var(--card);
+      color: var(--text); font-size: 11.5px; font-weight: 700;
+      white-space: nowrap; transition: background .12s, transform .1s;
+    }
+    .plan-action:hover:not(:disabled) { background: var(--surface); }
+    .plan-action:active:not(:disabled) { transform: scale(.96); }
+    .plan-action:disabled { opacity: .4; cursor: not-allowed; }
+
+    .plan-stage {
+      position: relative; flex: 1; min-height: 220px;
+      overflow: hidden;
+      background: #dfe6ee;
+      touch-action: none;
+    }
+    body.dark .plan-stage { background: #0f172a; }
+    #plan-canvas {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      display: block; background: #fff;
+      touch-action: none; cursor: grab;
+      outline: none;
+    }
+    #plan-canvas.dragging { cursor: grabbing; }
+
+    .plan-empty {
+      position: absolute; inset: 0;
+      display: grid; place-items: center;
+      padding: 24px; pointer-events: none;
+    }
+    .plan-empty[hidden] { display: none !important; }
+    .plan-empty-card {
+      width: min(360px, 100%);
+      background: var(--surface);
+      backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+      border: 1px solid var(--line); border-radius: 16px;
+      padding: 20px; text-align: center; box-shadow: var(--shadow);
+    }
+    .plan-empty-icon { font-size: 28px; margin-bottom: 8px; }
+    .plan-empty-title { font-size: 14px; font-weight: 800; margin-bottom: 5px; }
+    .plan-empty-sub { font-size: 11.5px; color: var(--sub); line-height: 1.55; }
+
+    .plan-progress {
+      position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+      width: min(340px, calc(100% - 24px));
+      padding: 10px 12px;
+      background: var(--surface);
+      backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+      border: 1px solid var(--line); border-radius: 12px;
+      box-shadow: var(--shadow);
+      pointer-events: none; z-index: 4;
+    }
+    .plan-progress[hidden] { display: none !important; }
+    .plan-progress-text {
+      font-size: 11px; font-weight: 700; color: var(--text);
+      margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .plan-progress-track {
+      height: 5px; border-radius: 999px; overflow: hidden; background: var(--card);
+    }
+    #plan-progress-bar {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--success));
+      border-radius: 999px; transition: width .2s;
+    }
+    #plan-progress-bar.indeterminate {
+      animation: plan-indeterminate 1.2s ease-in-out infinite;
+      transform-origin: left center;
+    }
+    @keyframes plan-indeterminate {
+      0%   { transform: scaleX(.15); }
+      50%  { transform: scaleX(.85); }
+      100% { transform: scaleX(.15); }
+    }
+
+    .plan-zoombar {
+      position: absolute; right: 12px; bottom: 12px;
+      display: flex; flex-direction: column; gap: 5px;
+      z-index: 3;
+    }
+    .plan-zoombar button {
+      width: 36px; height: 36px; border-radius: 9px;
+      background: var(--surface);
+      backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+      border: 1px solid var(--line);
+      color: var(--text); font-size: 16px; font-weight: 700;
+      display: grid; place-items: center;
+      box-shadow: var(--shadow);
+      transition: transform .1s, background .12s;
+    }
+    .plan-zoombar button:active { transform: scale(.93); }
+
+    .plan-scalebar {
+      position: absolute; left: 14px; bottom: 14px;
+      display: flex; flex-direction: column; gap: 2px;
+      padding: 5px 7px 4px;
+      background: rgba(255,255,255,.9);
+      border: 1px solid rgba(15,23,42,.12);
+      border-radius: 6px;
+      color: #0f172a; pointer-events: none; z-index: 3;
+    }
+    .plan-scalebar[hidden] { display: none !important; }
+    .plan-scalebar-track {
+      height: 7px; border: 1px solid #0f172a;
+      display: flex; overflow: hidden;
+    }
+    #plan-scale-fill {
+      display: block; height: 100%; width: 80px;
+      background: linear-gradient(90deg, #0f172a 0 50%, #fff 50% 100%);
+    }
+    #plan-scale-label {
+      font-size: 9px; font-weight: 700; text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .plan-foot {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 8px 14px;
+      background: var(--surface);
+      border-top: 1px solid var(--line);
+      font-size: 11px; color: var(--muted);
+      flex-shrink: 0;
+    }
+    #plan-status {
+      min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #plan-count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+    @media (max-width: 899px) {
+      #plan-modal { padding: 0; }
+      .plan-shell {
+        height: 100dvh; max-height: 100dvh;
+        border-radius: 0; border: none;
+      }
+      .plan-head {
+        padding: 8px 10px;
+        padding-top: max(8px, env(safe-area-inset-top));
+      }
+      .plan-title strong { max-width: 55vw; }
+      .plan-toolbar { padding: 7px 9px; gap: 6px; }
+      .plan-field { flex: 1 1 120px; }
+      .plan-field select { max-width: none; width: 100%; }
+      .plan-field:first-child { flex: 1 1 160px; }
+      .plan-field:nth-child(2) { flex: 0 1 92px; }
+      .plan-check { height: 30px; font-size: 11px; }
+      .plan-action { height: 30px; padding: 0 9px; }
+      .plan-toolbar .btn-cta { height: 30px; padding: 0 12px; }
+      .plan-spacer { display: none; }
+      .plan-foot {
+        padding-bottom: max(8px, env(safe-area-inset-bottom));
+        font-size: 10.5px;
+      }
+      #plan-count { display: none; }
+    }
+
+    @media (max-width: 420px) {
+      .plan-kicker { display: none; }
+      .plan-title strong { max-width: 62vw; font-size: 12px; }
+      .plan-check { padding: 0 6px; gap: 3px; font-size: 10px; }
+      .plan-check input { width: 13px; height: 13px; }
+    }
+
     /* ═══ YOUTUBE BADGE ════════════════════════════════════════ */
     #yt-badge {
       flex-shrink: 0;
@@ -624,6 +867,16 @@
       </div>
 
       <div class="group">
+        <div class="group-label">Planos</div>
+        <div class="chips">
+          <button class="chip" id="btn-plans">📐 Abrir planos 2D</button>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.4;">
+          Plantas por nivel · DXF · PNG/PDF
+        </div>
+      </div>
+
+      <div class="group">
         <div class="group-label">Fondo</div>
         <div class="chips">
           <button class="chip active" data-bg="light">Claro</button>
@@ -697,6 +950,100 @@
       <button class="gp-btn"             id="gp-copy">Copiar</button>
       <button class="gp-btn"             id="gp-isolate">Aislar</button>
       <button class="gp-btn gp-btn-accent" id="gp-zoom">Zoom</button>
+    </div>
+  </div>
+
+  <!-- ═══ PLANOS 2D ═════════════════════════════════════════════ -->
+  <div id="plan-modal" hidden>
+    <div class="plan-shell">
+      <header class="plan-head">
+        <div class="plan-title">
+          <span class="plan-kicker">Planos 2D</span>
+          <strong id="plan-model">Sin modelo</strong>
+        </div>
+        <div class="plan-head-actions">
+          <button class="icon-btn" id="plan-close" aria-label="Cerrar planos"
+                  style="width:30px;height:30px;font-size:13px;">✕</button>
+        </div>
+      </header>
+
+      <div class="plan-toolbar">
+        <label class="plan-field">
+          <span>Nivel</span>
+          <select id="plan-level"></select>
+        </label>
+        <label class="plan-field">
+          <span>Altura de corte</span>
+          <select id="plan-cut">
+            <option value="0.9">0.90 m</option>
+            <option value="1.2" selected>1.20 m</option>
+            <option value="1.5">1.50 m</option>
+            <option value="2.0">2.00 m</option>
+          </select>
+        </label>
+        <button class="btn-cta" id="plan-generate">Generar plano</button>
+        <label class="plan-check" title="Mostrar aristas ocultas">
+          <input type="checkbox" id="plan-hidden" />
+          <span>Ocultas</span>
+        </label>
+        <label class="plan-check" title="Incluir mobiliario en la proyección (puede ralentizar)">
+          <input type="checkbox" id="plan-furniture" />
+          <span>Mobiliario</span>
+        </label>
+        <label class="plan-check" title="Incluir instalaciones MEP en la proyección">
+          <input type="checkbox" id="plan-mep" />
+          <span>MEP</span>
+        </label>
+        <label class="plan-check" title="Incluir elementos genéricos (IfcBuildingElementProxy)">
+          <input type="checkbox" id="plan-proxies" checked />
+          <span>Genéricos</span>
+        </label>
+        <label class="plan-check" title="Recortar al contorno de las losas del edificio">
+          <input type="checkbox" id="plan-crop" checked />
+          <span>Recortar</span>
+        </label>
+        <div class="plan-spacer"></div>
+        <button class="plan-action" id="plan-dxf" disabled title="Exportar DXF a escala">DXF</button>
+        <button class="plan-action" id="plan-png" disabled title="Exportar lámina A3 en PNG">PNG</button>
+        <button class="plan-action" id="plan-print" disabled title="Imprimir o guardar como PDF">PDF</button>
+      </div>
+
+      <div class="plan-stage" id="plan-stage">
+        <canvas id="plan-canvas" aria-label="Plano 2D del nivel seleccionado"></canvas>
+
+        <div class="plan-empty" id="plan-empty">
+          <div class="plan-empty-card">
+            <div class="plan-empty-icon">📐</div>
+            <div class="plan-empty-title">Elige un nivel</div>
+            <div class="plan-empty-sub">
+              Se proyectarán muros, puertas, ventanas, columnas y losas del nivel.
+            </div>
+          </div>
+        </div>
+
+        <div class="plan-progress" id="plan-progress" hidden>
+          <div class="plan-progress-text" id="plan-progress-text">Generando plano…</div>
+          <div class="plan-progress-track">
+            <div id="plan-progress-bar"></div>
+          </div>
+        </div>
+
+        <div class="plan-zoombar">
+          <button type="button" data-plan-zoom="in"  aria-label="Acercar">+</button>
+          <button type="button" data-plan-zoom="out" aria-label="Alejar">−</button>
+          <button type="button" data-plan-zoom="fit" aria-label="Encuadrar">⤢</button>
+        </div>
+
+        <div class="plan-scalebar" id="plan-scalebar" hidden>
+          <div class="plan-scalebar-track"><i id="plan-scale-fill"></i></div>
+          <span id="plan-scale-label">5 m</span>
+        </div>
+      </div>
+
+      <footer class="plan-foot">
+        <span id="plan-status">Carga un modelo y elige un nivel.</span>
+        <span id="plan-count"></span>
+      </footer>
     </div>
   </div>
 

@@ -2,6 +2,7 @@ import * as OBC from "@thatopen/components";
 import * as OBF from "@thatopen/components-front";
 import * as THREE from "three";
 import { createPopup, metaFor } from "./popup.js";
+import { createPlanManager } from "./plans.js";
 import { buildBaseMap } from "./basemap.js";
 import { ZONE, SITE_E, SITE_N, SITE_ELEV, utmToLatLon, extractIfcGeoreference } from "./gis.js";
 
@@ -201,6 +202,16 @@ const init = async () => {
   // Estado dinámico de georreferencia: inicia en null si no hay modelo
   let geoOrigin = null;
   let center = null;
+
+  // Planos 2D: se crean bajo demanda al abrir el modal.
+  const plans = createPlanManager({
+    components,
+    world,
+    getModel: () => activeModel,
+    getModelName: () => modelNameEl?.textContent?.trim() || "modelo",
+    getModelBox: () => modelBox,
+    getLayerItems: () => layerItems,
+  });
 
   const applyGeoreference = (georef) => {
     if (georef && georef.hasGeoref) {
@@ -861,6 +872,7 @@ const init = async () => {
     }
 
     await buildLayers(model);
+    plans.setModel(model, name, modelBox);
     buildingBox = await computeBuildingBox(model);
     await applyVisibility();
     applyView("iso");
@@ -873,6 +885,7 @@ const init = async () => {
   // Limpieza segura del modelo anterior (sin destruir FragmentsManager)
   const clearModel = async () => {
     try {
+      plans.reset();
       if (highlighter) {
         try { await highlighter.clear("select"); } catch {}
       }
@@ -994,7 +1007,7 @@ const init = async () => {
   /* ----------------------- arranque ------------------------ */
   status("Listo. Carga un modelo IFC para comenzar.");
 
-  window.__bim = { components, world, fragments, ifcLoader, THREE, OBC, OBF, popup, metaFor, clearModel, loadAndFit };
+  window.__bim = { components, world, fragments, ifcLoader, THREE, OBC, OBF, popup, plans, metaFor, clearModel, loadAndFit };
 };
 
 init();
