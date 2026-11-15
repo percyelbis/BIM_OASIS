@@ -12,10 +12,13 @@ Visor web del modelo IFC (`proyecto.ifc`) con mapa base OpenStreetMap, propiedad
    - **PNG**: lámina A3 con cajetín, escala gráfica y datos del nivel.
    - **PDF**: abre la lámina en una ventana de impresión para guardarla como PDF.
 
+El nivel inicial es el que tiene más muros, vanos y estructura, para no abrir en una plataforma vacía.
+
 Opciones:
-- **Ocultas**: muestra las aristas ocultas en gris discontinuo.
+- **Ocultas**: muestra las aristas ocultas en gris discontinuo y las incluye en el DXF.
 - **Mobiliario**: incluye muebles (puede ralentizar la proyección).
 - **MEP**: incluye instalaciones.
+- **Genéricos**: incluye elementos `IfcBuildingElementProxy`. Activo por defecto; desactívalo para aligerar modelos muy grandes.
 - **Recortar**: descarta elementos fuera del contorno de las losas del edificio.
 
 > La generación es una proyección de aristas (líneas), no un motor de documentación completo: no crea sombreados, cotas ni rótulos automáticos. Para modelos grandes conviene desactivar **Genéricos**, **Mobiliario** y **MEP**; el plano tarda menos y queda más limpio.
